@@ -31,10 +31,18 @@ Bench Press       18     18,450      140
 
 (All numbers above come from the built-in synthetic generator, not a real person.)
 
+Charts come as one self-contained HTML file, drawn by `wearables/figures.py`:
+
+```
+wearables report demo/ -o report.html   # one HTML file: summary tiles + 6 charts, opens in any browser
+```
+
 ## Install
 
 ```
-uv venv && uv pip install -e '.[dev]'    # Python 3.11+
+uv venv && uv pip install -e '.[dev]'    # Python 3.11+, charts and tests included
+uv pip install -e .                      # CLI only (gpxpy)
+uv pip install -e '.[report]'            # + plotly, for `wearables report`
 ```
 
 ## Use
@@ -47,6 +55,7 @@ wearables weekly   export.zip --weeks 12      # workouts, hours, km, kcal per we
 wearables load     export.zip                 # rough 7d vs 28d training load
 wearables strength my-data/                   # weekly lifting volume + top exercises (needs Fitbod)
 wearables summary  routes/ --json             # a folder of .gpx files; --json works everywhere
+wearables report   my-data/ -o report.html    # charts as one file; --since 2026-01-01, --offline
 wearables synth    demo.xml --fitbod demo.csv # synthetic Apple export + Fitbod CSV for demos
 ```
 
@@ -56,10 +65,12 @@ A path can be an Apple `export.xml` / `export.zip`, a Fitbod `WorkoutExport.csv`
 
 ```
 adapters/apple_health.py ┐
-adapters/fitbod.py       ├─> model.Dataset ─> merge.reconcile ─> analytics ─> cli
-adapters/gpx.py          ┘
+adapters/fitbod.py       ├─> model.Dataset ─> merge.reconcile ─> analytics ─┬─> cli
+adapters/gpx.py          ┘                                                  └─> figures ─> report (static HTML)
 (future: Oura, Garmin, …)
 ```
+
+The charts are built in steps: the CLI and `--json` first, then `figures.py` plus a static `report` (a file you can open, send or archive, with no server). `figures.py` is the only place that knows about charts, so an interactive layer can call the same functions later.
 
 An adapter is a module with `load(path) -> Dataset`. Adapters only say what their source says. `merge.reconcile` then resolves overlaps, and analytics only see the neutral model (`Workout`, `StrengthSet`, `DailyMetric`, `SleepNight`), so a new source needs no changes to them.
 
@@ -76,6 +87,8 @@ Choices worth knowing:
 - **Lifting volume** = reps × weight × multiplier, warm-ups excluded. Fitbod does not document the multiplier (2.0 for a pair of dumbbells, 0.0 for bodyweight and holds); this is the usual reading.
 - **Training load** = minutes × share of heart-rate reserve used (clamped 0 to 1), as 7-day vs 28-day daily averages. It is a rough way to compare weeks, not medical or coaching advice. Workouts without heart rate are skipped and counted, so it understates load when many are missing.
 - GPX elevation gain is smoothed by `gpxpy`, so it reads lower than a raw sum.
+- **Charts stay local.** The report is a file; by default it loads plotly.js from a CDN (the page fetches the script, your data is embedded in the file and never sent), and `--offline` embeds the library instead (~5 MB). A large Apple export takes a couple of minutes to parse.
+- **Load chart caveat.** Workouts with no heart rate are left out and the chart title counts them, so on data where many are missing the lines understate real load.
 
 ## Tests
 
@@ -88,13 +101,14 @@ The synthetic generator doubles as the test oracle. `synth.build` makes a ground
 ## Not yet
 
 - No FIT, TCX, Oura, Garmin or Google Health adapters (Garmin's Personal API and Oura's OAuth API are the candidates).
-- No charts or web UI; `--json` is the hook for one.
+- The charts were checked by tests and a run on a real export, not by eye in every browser.
+- No interactive dashboard yet.
 - Hevy (a second lifting app) is only seen through the Apple workouts it writes; there is no set-level reader.
 - Sleep before iOS 16 has no stages, so its quality cannot be analysed.
 
 ## Libraries
 
-[`gpxpy`](https://github.com/tkrajina/gpxpy) (Apache-2.0, 1K+ stars) for GPX. Everything else is the standard library (`zoneinfo` for time zones); `pytest` and `ruff` for development.
+[`gpxpy`](https://github.com/tkrajina/gpxpy) (Apache-2.0, 1K+ stars) for GPX. Optional: [`plotly`](https://github.com/plotly/plotly.py) (MIT, 16K+ stars) for charts, chosen over hand-rolled SVG/HTML because hover and zoom are what it exists for. Everything else is the standard library (`zoneinfo` for time zones); `pytest` and `ruff` for development.
 
 ## License
 

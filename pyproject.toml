@@ -8,7 +8,8 @@ license = { text = "MIT" }
 dependencies = ["gpxpy>=1.6", "tzdata; sys_platform == 'win32'"]  # zoneinfo needs tzdata on Windows
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+report = ["plotly>=5.24"]
+dev = ["pytest>=8", "ruff>=0.6", "plotly>=5.24"]
 
 [project.scripts]
 wearables = "wearables.cli:main"

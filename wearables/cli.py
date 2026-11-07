@@ -40,6 +40,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--top-days", type=int, default=90, help="look-back for the exercise list (default 90)"
     )
 
+    report = sub.add_parser("report", help="write an HTML report with charts (needs the report extra)")
+    report.add_argument("path", help="same inputs as the other commands")
+    report.add_argument("-o", "--out", default="report.html", help="output file (default report.html)")
+    report.add_argument(
+        "--since", type=date.fromisoformat, metavar="YYYY-MM-DD", help="chart only data from this day on"
+    )
+    report.add_argument(
+        "--offline", action="store_true", help="embed plotly.js (~5 MB) instead of loading it from a CDN"
+    )
+
     gen = sub.add_parser("synth", help="write a synthetic Apple Health export.xml (and Fitbod CSV) for demos")
     gen.add_argument("out", help="output path, e.g. demo-export.xml")
     gen.add_argument(
@@ -175,6 +185,17 @@ def cmd_strength(args: argparse.Namespace) -> str:
     return "\n".join(out)
 
 
+def cmd_report(args: argparse.Namespace) -> str:
+    try:
+        from wearables import report
+    except ImportError as exc:  # plotly is an optional extra
+        raise ValueError("the report needs plotly: pip install 'wearable-analyzer[report]'") from exc
+    html = report.build_report(_load(args.path), since=args.since, offline=args.offline)
+    with open(args.out, "w", encoding="utf-8") as f:
+        f.write(html)
+    return f"wrote {args.out} ({len(html) / 1e6:.1f} MB)"
+
+
 def cmd_synth(args: argparse.Namespace) -> str:
     ds = synth.build(args.days, args.seed, args.end)
     synth.write_apple_export(ds, args.out, seed=args.seed)
@@ -190,6 +211,7 @@ COMMANDS = {
     "weekly": cmd_weekly,
     "load": cmd_load,
     "strength": cmd_strength,
+    "report": cmd_report,
     "synth": cmd_synth,
 }
 
