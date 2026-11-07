@@ -3,8 +3,10 @@
 import argparse
 import dataclasses
 import json
+import os
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 from wearables import adapters, analytics, synth
 from wearables.model import LB_PER_KG, Dataset
@@ -49,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument(
         "--offline", action="store_true", help="embed plotly.js (~5 MB) instead of loading it from a CDN"
     )
+
+    app = sub.add_parser("app", help="open the interactive dashboard in your browser (needs the app extra)")
+    app.add_argument(
+        "path", nargs="?", default="", help="same inputs as the other commands; can be set in the app"
+    )
+    app.add_argument("--port", type=int, default=8501)
 
     gen = sub.add_parser("synth", help="write a synthetic Apple Health export.xml (and Fitbod CSV) for demos")
     gen.add_argument("out", help="output path, e.g. demo-export.xml")
@@ -196,6 +204,25 @@ def cmd_report(args: argparse.Namespace) -> str:
     return f"wrote {args.out} ({len(html) / 1e6:.1f} MB)"
 
 
+def cmd_app(args: argparse.Namespace) -> str:
+    try:
+        import streamlit.web.cli as stcli
+    except ImportError as exc:  # streamlit is an optional extra
+        raise ValueError("the dashboard needs streamlit: pip install 'wearable-analyzer[app]'") from exc
+    script = str(Path(__file__).with_name("app.py"))
+    argv = [
+        "streamlit", "run", script,
+        "--server.address", "127.0.0.1",  # health data: this machine only
+        "--server.port", str(args.port),
+        "--browser.gatherUsageStats", "false",
+    ]  # fmt: skip
+    if args.path:
+        os.environ["WEARABLES_PATH"] = args.path
+    sys.argv = argv
+    stcli.main()  # runs until Ctrl-C
+    return ""
+
+
 def cmd_synth(args: argparse.Namespace) -> str:
     ds = synth.build(args.days, args.seed, args.end)
     synth.write_apple_export(ds, args.out, seed=args.seed)
@@ -212,6 +239,7 @@ COMMANDS = {
     "load": cmd_load,
     "strength": cmd_strength,
     "report": cmd_report,
+    "app": cmd_app,
     "synth": cmd_synth,
 }
 

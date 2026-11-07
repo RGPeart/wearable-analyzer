@@ -9,7 +9,8 @@ dependencies = ["gpxpy>=1.6", "tzdata; sys_platform == 'win32'"]  # zoneinfo nee
 
 [project.optional-dependencies]
 report = ["plotly>=5.24"]
-dev = ["pytest>=8", "ruff>=0.6", "plotly>=5.24"]
+app = ["plotly>=5.24", "streamlit>=1.40"]
+dev = ["pytest>=8", "ruff>=0.6", "plotly>=5.24", "streamlit>=1.40"]
 
 [project.scripts]
 wearables = "wearables.cli:main"
