@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environments and secrets
+.env
+.venv/
+venv/
+
+# Personal health data: never commit
+export.xml
+export_cda.xml
+apple_health_export/
+*.zip
+*.fit
+*.gpx
+!tests/fixtures/*.gpx
+data/
+my-data/
+
+# Editors, OS, tool caches
+.vscode/
+.idea/
+.DS_Store
+.pytest_cache/
+.ruff_cache/
