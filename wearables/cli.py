@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--top-days", type=int, default=90, help="look-back for the exercise list (default 90)"
     )
 
+    sleep = with_input("sleep", "sleep the night before and after workout days (needs sleep stages: iOS 16+)")
+    sleep.add_argument(
+        "--min-minutes", type=float, default=20, help="shortest workout that counts (default 20)"
+    )
+
     report = sub.add_parser("report", help="write an HTML report with charts (needs the report extra)")
     report.add_argument("path", help="same inputs as the other commands")
     report.add_argument("-o", "--out", default="report.html", help="output file (default report.html)")
@@ -193,6 +198,40 @@ def cmd_strength(args: argparse.Namespace) -> str:
     return "\n".join(out)
 
 
+def cmd_sleep(args: argparse.Namespace) -> str:
+    ds = _load(args.path)
+    effects = analytics.sleep_vs_workouts(ds, min_minutes=args.min_minutes)
+    if args.json:
+        return _json(effects)
+    nights = sum(1 for s in ds.sleep if not s.in_bed_only)
+    if not effects:
+        raise ValueError(
+            f"not enough nights with sleep stages to compare ({nights} found, 10 needed per group)"
+        )
+    rows = [
+        [
+            e.group,
+            e.when,
+            str(e.nights),
+            f"{e.mean_h:.2f}",
+            f"{e.baseline_h:.2f}",
+            f"{e.diff_h:+.2f} ± {e.ci_h:.2f}",
+        ]
+        for e in effects
+    ]
+    return "\n".join(
+        [
+            table(["workout", "night", "nights", "sleep h", "no-workout h", "difference h"], rows),
+            "",
+            f"Uses the {nights} nights that have asleep stages; time-in-bed-only nights are left out.",
+            "'before' is the night ending that morning, 'after' the night starting that evening;",
+            "'no-workout h' averages nights with no workout the evening before or the morning after.",
+            "± is a rough 95% range: when it spans zero, the data does not show a difference.",
+            "Observational only: an early alarm before a morning session also shortens the night before.",
+        ]
+    )
+
+
 def cmd_report(args: argparse.Namespace) -> str:
     try:
         from wearables import report
@@ -238,6 +277,7 @@ COMMANDS = {
     "weekly": cmd_weekly,
     "load": cmd_load,
     "strength": cmd_strength,
+    "sleep": cmd_sleep,
     "report": cmd_report,
     "app": cmd_app,
     "synth": cmd_synth,

@@ -8,7 +8,8 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
-from statistics import fmean, median
+from statistics import correlation as pearson
+from statistics import fmean, median, variance
 
 from wearables.model import Dataset, StrengthSet, Workout
 from wearables.tz import local_day
@@ -238,6 +239,100 @@ def summarize(ds: Dataset, as_of: date | None = None) -> dict:
     out["sleep_hours_avg_30d"] = fmean(sleep) if sleep else None
     out["steps_avg_30d"] = fmean(steps) if steps else None
     return out
+
+
+@dataclass(frozen=True)
+class SleepEffect:
+    """Sleep around workout days of one kind, against sleep around days with no workout."""
+
+    group: str  # "any workout" or a sport
+    when: str  # "before" (the night ending that morning) or "after" (the night starting that evening)
+    nights: int
+    mean_h: float
+    baseline_nights: int
+    baseline_h: float
+    diff_h: float  # mean_h - baseline_h
+    ci_h: float  # half-width of a ~95% interval on diff_h (Welch, normal approximation)
+
+
+def _welch_half_width(a: list[float], b: list[float]) -> float:
+    return 1.96 * (variance(a) / len(a) + variance(b) / len(b)) ** 0.5
+
+
+def sleep_vs_workouts(
+    ds: Dataset, min_minutes: float = 20, min_nights: int = 10, max_sports: int = 4
+) -> list[SleepEffect]:
+    """Does sleep differ the night before or after a workout day?
+
+    Only nights with asleep stages count; time-in-bed nights overstate sleep. A night is keyed by the
+    evening it starts (see :func:`wearables.tz.local_night`), so the sleep before workout day W is night
+    W-1 and the sleep after it is night W. The comparison is observational: an early alarm before a
+    morning session would also shorten the night before, and nothing here shows cause. The baseline is
+    nights with no workout on the evening before or the morning after. A night can sit in both the
+    "before" and "after" groups when workouts fall on consecutive days.
+    """
+    asleep = {s.night: s.asleep_s / 3600 for s in ds.sleep if not s.in_bed_only}
+    by_sport: dict[str, set[date]] = defaultdict(set)
+    for w in ds.workouts:
+        if w.duration_s >= min_minutes * 60:
+            by_sport[w.sport].add(local_day(w.start))
+    any_days = set().union(*by_sport.values()) if by_sport else set()
+    sports = sorted(by_sport, key=lambda s: (-len(by_sport[s]), s))[:max_sports]
+    groups = [("any workout", any_days), *((s, by_sport[s]) for s in sports)]
+
+    # Baseline: nights with no workout on either side (the evening before or the morning after). Comparing
+    # against every non-workout day would fold the nights before workouts into the baseline for "after".
+    baseline = [h for n, h in asleep.items() if n not in any_days and n + timedelta(days=1) not in any_days]
+    out = []
+    for when, offset in (("before", -1), ("after", 0)):
+        for name, days in groups:
+            hit = [asleep[d + timedelta(days=offset)] for d in days if d + timedelta(days=offset) in asleep]
+            if len(hit) < max(min_nights, 2) or len(baseline) < max(min_nights, 2):
+                continue
+            out.append(
+                SleepEffect(
+                    name,
+                    when,
+                    len(hit),
+                    fmean(hit),
+                    len(baseline),
+                    fmean(baseline),
+                    fmean(hit) - fmean(baseline),
+                    _welch_half_width(hit, baseline),
+                )  # fmt: skip
+            )
+    return out
+
+
+@dataclass(frozen=True)
+class SleepRecovery:
+    night: date
+    sleep_h: float
+    resting_hr: float | None  # measured on the morning after the night
+    hrv_ms: float | None
+
+
+def sleep_vs_recovery(ds: Dataset) -> list[SleepRecovery]:
+    """Each asleep-stage night joined to the next day's resting heart rate and HRV, where recorded."""
+    daily = {d.day: d for d in ds.daily}
+    out = []
+    for s in sorted(ds.sleep, key=lambda s: s.night):
+        d = daily.get(s.night + timedelta(days=1))
+        if s.in_bed_only or d is None or (d.resting_hr is None and d.hrv_ms is None):
+            continue
+        out.append(SleepRecovery(s.night, s.asleep_s / 3600, d.resting_hr, d.hrv_ms))
+    return out
+
+
+def correlation(pairs: Iterable[tuple[float, float]], min_pairs: int = 10) -> float | None:
+    """Pearson r, or None with too few pairs or no spread in either series."""
+    pairs = list(pairs)
+    if len(pairs) < min_pairs:
+        return None
+    xs, ys = [p[0] for p in pairs], [p[1] for p in pairs]
+    if len(set(xs)) < 2 or len(set(ys)) < 2:
+        return None
+    return pearson(xs, ys)
 
 
 @dataclass(frozen=True)

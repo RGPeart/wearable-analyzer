@@ -34,7 +34,7 @@ Bench Press       18     18,450      140
 Charts come two ways, and both draw from the same figure code (`wearables/figures.py`):
 
 ```
-wearables report demo/ -o report.html   # one HTML file: summary tiles + 6 charts, opens in any browser
+wearables report demo/ -o report.html   # one HTML file: summary tiles + 8 charts, opens in any browser
 wearables app demo/                     # interactive dashboard on http://127.0.0.1:8501 (Streamlit)
 ```
 
@@ -56,6 +56,7 @@ wearables summary  export.zip                 # sports, 30-day resting HR / HRV 
 wearables weekly   export.zip --weeks 12      # workouts, hours, km, kcal per week
 wearables load     export.zip                 # rough 7d vs 28d training load
 wearables strength my-data/                   # weekly lifting volume + top exercises (needs Fitbod)
+wearables sleep    my-data/                   # sleep the night before / after workout days vs quiet nights
 wearables summary  routes/ --json             # a folder of .gpx files; --json works everywhere
 wearables report   my-data/ -o report.html    # charts as one file; --since 2026-01-01, --offline
 wearables app      my-data/                   # interactive dashboard (range, heart-rate overrides)
@@ -86,6 +87,7 @@ Choices worth knowing:
 - **Fitbod CSV quirks** handled: UTC dates repeated per set, newest-first file with performed-order rows, identical rows for identical sets (never de-duplicated), leading spaces, blank lines, and pounds converted to kg with float noise (snapped back to quarter pounds).
 - **Heart rate per workout** comes from the workout's own statistics. A fallback from raw samples is used only when they average at least one per minute; sparse background sampling would give a misleading average, so those workouts show none.
 - **Sleep** is the union of all "asleep" intervals (a Watch and a phone count once). Nights with only in-bed data (pre-iOS 16) fall back to time in bed, are flagged `in_bed_only`, and stay out of the sleep average.
+- **Sleep vs workouts** (`wearables sleep`, and the "Sleep and training" charts). Nights are keyed by the evening they start, so the sleep before workout day W is night W-1 and the sleep after it is night W. Each group of nights (any workout, then the most frequent sports) is compared with a baseline of nights that have no 20+ minute workout on the evening before or the morning after, with a rough 95% range (Welch, normal approximation). Only nights with asleep stages count, so on an export where stages start in 2025 the comparison covers 2025 onward. Fewer than 10 nights in a group and the row is dropped rather than shown as a noisy number. It is observational: an early alarm before a morning session also shortens the night before, and several comparisons are shown at once, so a small gap is not a finding. The scatter of sleep against the next morning's resting heart rate reports Pearson's r, a straight-line fit, and nothing about cause.
 - **Steps**: iPhone and Watch both count; the busiest source per day is used.
 - **Lifting volume** = reps × weight × multiplier, warm-ups excluded. Fitbod does not document the multiplier (2.0 for a pair of dumbbells, 0.0 for bodyweight and holds); this is the usual reading.
 - **Training load** = minutes × share of heart-rate reserve used (clamped 0 to 1), as 7-day vs 28-day daily averages. It is a rough way to compare weeks, not medical or coaching advice. Workouts without heart rate are skipped and counted, so it understates load when many are missing.
@@ -107,7 +109,8 @@ The synthetic generator doubles as the test oracle. `synth.build` makes a ground
 - The app re-parses on every server start (no on-disk cache), and the charts were checked by tests and a headless run rather than by eye on every browser.
 - No hosted demo of the app; the synthetic data would make a safe one.
 - Hevy (a second lifting app) is only seen through the Apple workouts it writes; there is no set-level reader.
-- Sleep before iOS 16 has no stages, so its quality cannot be analysed.
+- Sleep before iOS 16 has no stages, so its quality cannot be analysed, and it is left out of the sleep-vs-workout comparison.
+- Sleep stages (deep, REM) are summed into one asleep figure; the charts do not split them.
 
 ## Libraries
 
