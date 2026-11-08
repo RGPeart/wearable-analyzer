@@ -110,17 +110,16 @@ def default_max_hr(ds: Dataset) -> float | None:
     return max(values) if values else None
 
 
-def load_summary(
-    ds: Dataset, rest_hr: float | None = None, max_hr: float | None = None, as_of: date | None = None
-) -> LoadSummary:
+def _resolve_hr(ds: Dataset, rest_hr: float | None, max_hr: float | None) -> tuple[float, float]:
     rest_hr = rest_hr if rest_hr is not None else default_rest_hr(ds)
     max_hr = max_hr if max_hr is not None else default_max_hr(ds)
     if rest_hr is None or max_hr is None:
         raise ValueError("resting and max heart rate are unknown: pass --rest-hr and --max-hr")
-    as_of = as_of or last_day(ds)
-    if as_of is None:
-        raise ValueError("dataset is empty")
+    return rest_hr, max_hr
 
+
+def _daily_loads(ds: Dataset, rest_hr: float, max_hr: float) -> tuple[dict[date, float], int, int]:
+    """Load per local day, plus how many workouts were counted and how many had no heart rate."""
     daily: dict[date, float] = defaultdict(float)
     counted = skipped = 0
     for w in ds.workouts:
@@ -130,6 +129,61 @@ def load_summary(
             continue
         counted += 1
         daily[local_day(w.start)] += load
+    return daily, counted, skipped
+
+
+@dataclass(frozen=True)
+class LoadPoint:
+    day: date
+    acute: float  # mean daily load, 7 days ending on ``day``
+    chronic: float  # mean daily load, 28 days ending on ``day``
+
+
+@dataclass(frozen=True)
+class LoadHistory:
+    rest_hr: float
+    max_hr: float
+    points: list[LoadPoint]
+    sessions_counted: int
+    sessions_skipped: int
+
+
+def load_history(ds: Dataset, rest_hr: float | None = None, max_hr: float | None = None) -> LoadHistory:
+    """Acute and chronic load for every day from the first loaded workout to the last day of data."""
+    rest_hr, max_hr = _resolve_hr(ds, rest_hr, max_hr)
+    end = last_day(ds)
+    if end is None:
+        raise ValueError("dataset is empty")
+    daily, counted, skipped = _daily_loads(ds, rest_hr, max_hr)
+    points: list[LoadPoint] = []
+    if daily:
+        day = min(daily)
+        while day <= end:
+            acute = sum(daily.get(day - timedelta(days=i), 0.0) for i in range(7)) / 7
+            chronic = sum(daily.get(day - timedelta(days=i), 0.0) for i in range(28)) / 28
+            points.append(LoadPoint(day, acute, chronic))
+            day += timedelta(days=1)
+    return LoadHistory(rest_hr, max_hr, points, counted, skipped)
+
+
+def rolling_mean(series: Iterable[tuple[date, float]], window: int) -> list[tuple[date, float]]:
+    """Mean of the values in the ``window`` calendar days ending on each day that has a value."""
+    by_day = dict(series)
+    return [
+        (d, fmean([by_day[x] for i in range(window) if (x := d - timedelta(days=i)) in by_day]))
+        for d in sorted(by_day)
+    ]
+
+
+def load_summary(
+    ds: Dataset, rest_hr: float | None = None, max_hr: float | None = None, as_of: date | None = None
+) -> LoadSummary:
+    rest_hr, max_hr = _resolve_hr(ds, rest_hr, max_hr)
+    as_of = as_of or last_day(ds)
+    if as_of is None:
+        raise ValueError("dataset is empty")
+
+    daily, counted, skipped = _daily_loads(ds, rest_hr, max_hr)
     series = list(daily.items())
     acute = sum(_window(series, as_of, 7)) / 7
     chronic = sum(_window(series, as_of, 28)) / 28

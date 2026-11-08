@@ -31,10 +31,20 @@ Bench Press       18     18,450      140
 
 (All numbers above come from the built-in synthetic generator, not a real person.)
 
+Charts come two ways, and both draw from the same figure code (`wearables/figures.py`):
+
+```
+wearables report demo/ -o report.html   # one HTML file: summary tiles + 6 charts, opens in any browser
+wearables app demo/                     # interactive dashboard on http://127.0.0.1:8501 (Streamlit)
+```
+
 ## Install
 
 ```
-uv venv && uv pip install -e '.[dev]'    # Python 3.11+
+uv venv && uv pip install -e '.[dev]'    # Python 3.11+, everything incl. charts and tests
+uv pip install -e .                      # CLI only (gpxpy)
+uv pip install -e '.[report]'            # + plotly, for `wearables report`
+uv pip install -e '.[app]'               # + plotly and streamlit, for `wearables app`
 ```
 
 ## Use
@@ -47,6 +57,8 @@ wearables weekly   export.zip --weeks 12      # workouts, hours, km, kcal per we
 wearables load     export.zip                 # rough 7d vs 28d training load
 wearables strength my-data/                   # weekly lifting volume + top exercises (needs Fitbod)
 wearables summary  routes/ --json             # a folder of .gpx files; --json works everywhere
+wearables report   my-data/ -o report.html    # charts as one file; --since 2026-01-01, --offline
+wearables app      my-data/                   # interactive dashboard (range, heart-rate overrides)
 wearables synth    demo.xml --fitbod demo.csv # synthetic Apple export + Fitbod CSV for demos
 ```
 
@@ -56,10 +68,12 @@ A path can be an Apple `export.xml` / `export.zip`, a Fitbod `WorkoutExport.csv`
 
 ```
 adapters/apple_health.py ┐
-adapters/fitbod.py       ├─> model.Dataset ─> merge.reconcile ─> analytics ─> cli
-adapters/gpx.py          ┘
-(future: Oura, Garmin, …)
+adapters/fitbod.py       ├─> model.Dataset ─> merge.reconcile ─> analytics ─┬─> cli
+adapters/gpx.py          ┘                                                  └─> figures ─┬─> report (static HTML)
+(future: Oura, Garmin, …)                                                                └─> app (Streamlit)
 ```
+
+The charts grew in three steps, each on top of the last: the CLI and `--json` first, then `figures.py` plus a static `report` (a file you can open, send or archive, with no server), then the Streamlit `app` as a thin layer that calls the same figure functions and adds a range picker and heart-rate overrides. Fixing a chart in `figures.py` fixes it in both.
 
 An adapter is a module with `load(path) -> Dataset`. Adapters only say what their source says. `merge.reconcile` then resolves overlaps, and analytics only see the neutral model (`Workout`, `StrengthSet`, `DailyMetric`, `SleepNight`), so a new source needs no changes to them.
 
@@ -76,6 +90,8 @@ Choices worth knowing:
 - **Lifting volume** = reps × weight × multiplier, warm-ups excluded. Fitbod does not document the multiplier (2.0 for a pair of dumbbells, 0.0 for bodyweight and holds); this is the usual reading.
 - **Training load** = minutes × share of heart-rate reserve used (clamped 0 to 1), as 7-day vs 28-day daily averages. It is a rough way to compare weeks, not medical or coaching advice. Workouts without heart rate are skipped and counted, so it understates load when many are missing.
 - GPX elevation gain is smoothed by `gpxpy`, so it reads lower than a raw sum.
+- **Charts stay local.** The report is a file; by default it loads plotly.js from a CDN (the page fetches the script, your data is embedded in the file and never sent), and `--offline` embeds the library instead (~5 MB). The app binds to `127.0.0.1` and turns Streamlit's usage statistics off. A large Apple export takes a couple of minutes to parse; the app parses once per server run and keeps the result.
+- **Load chart caveat.** Workouts with no heart rate are left out and the chart title counts them, so on data where many are missing the lines understate real load.
 
 ## Tests
 
@@ -88,13 +104,14 @@ The synthetic generator doubles as the test oracle. `synth.build` makes a ground
 ## Not yet
 
 - No FIT, TCX, Oura, Garmin or Google Health adapters (Garmin's Personal API and Oura's OAuth API are the candidates).
-- No charts or web UI; `--json` is the hook for one.
+- The app re-parses on every server start (no on-disk cache), and the charts were checked by tests and a headless run rather than by eye on every browser.
+- No hosted demo of the app; the synthetic data would make a safe one.
 - Hevy (a second lifting app) is only seen through the Apple workouts it writes; there is no set-level reader.
 - Sleep before iOS 16 has no stages, so its quality cannot be analysed.
 
 ## Libraries
 
-[`gpxpy`](https://github.com/tkrajina/gpxpy) (Apache-2.0, 1K+ stars) for GPX. Everything else is the standard library (`zoneinfo` for time zones); `pytest` and `ruff` for development.
+[`gpxpy`](https://github.com/tkrajina/gpxpy) (Apache-2.0, 1K+ stars) for GPX. Optional: [`plotly`](https://github.com/plotly/plotly.py) (MIT, 16K+ stars) for charts and [`streamlit`](https://github.com/streamlit/streamlit) (Apache-2.0, 40K+ stars) for the dashboard, both chosen over hand-rolled SVG/HTML because the interactivity (hover, zoom, range) is what they exist for. Everything else is the standard library (`zoneinfo` for time zones); `pytest` and `ruff` for development.
 
 ## License
 
