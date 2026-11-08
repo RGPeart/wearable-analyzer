@@ -42,13 +42,13 @@ def test_renders_tiles_and_sections(folder):
     at = run(str(folder))
     assert not at.exception
     assert [m.label for m in at.metric][:2] == ["Workouts", "Resting HR, 30 days"]
-    assert [h.value for h in at.header] == ["Activity", "Lifting", "Recovery", "Load"]
+    assert [h.value for h in at.header] == ["Activity", "Lifting", "Recovery", "Load", "Sleep and training"]
 
 
 def test_range_preset_changes_the_view_without_error(folder):
     at = run(str(folder))
     at.sidebar.selectbox[0].set_value("Last 90 days").run()
-    assert not at.exception and len(at.header) == 4
+    assert not at.exception and len(at.header) == 5
 
 
 def test_app_command_without_streamlit_installed_explains_itself(capsys, monkeypatch):

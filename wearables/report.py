@@ -68,6 +68,8 @@ def build_report(
     notes = [
         "Training load is a rough heart-rate-reserve estimate for comparing weeks, not medical advice.",
         "Nights with only time-in-bed data (before iOS 16) overstate sleep and stay out of its average.",
+        "The sleep-and-training charts only use nights with sleep stages and are observational: they show "
+        "patterns, not causes.",
         *ds.warnings,
     ]
     return (

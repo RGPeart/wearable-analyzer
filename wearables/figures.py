@@ -7,6 +7,7 @@ figure, or ``None`` when the data has nothing to draw. Needs the ``report`` extr
 """
 
 from datetime import date, timedelta
+from statistics import linear_regression
 
 import plotly.graph_objects as go
 
@@ -190,6 +191,74 @@ def training_load(
     return fig
 
 
+def _sleep_since(ds: Dataset, since: date | None) -> Dataset:
+    """Only the nights from ``since`` on; workouts stay whole because a night looks at the next day."""
+    if since is None:
+        return ds
+    return Dataset(
+        workouts=ds.workouts, daily=ds.daily, sleep=[s for s in ds.sleep if s.night >= since], sets=ds.sets
+    )
+
+
+def sleep_around_workouts(ds: Dataset, since: date | None = None) -> go.Figure | None:
+    effects = analytics.sleep_vs_workouts(_sleep_since(ds, since))
+    if not effects:
+        return None
+    first = effects[0]
+    fig = _base(
+        f"Sleep around workout days, against {first.baseline_nights} nights with no workout either side "
+        f"({first.baseline_h:.1f} h on average)",
+        "hours of sleep vs those nights",
+    )
+    fig.update_layout(hovermode="closest", barmode="group", title={"font": {"size": 14}})
+    fig.add_hline(y=0, line_color=GREY, line_width=1)
+    for when, color in (("before", BLUE), ("after", ORANGE)):
+        rows = [e for e in effects if e.when == when]
+        fig.add_bar(
+            x=[e.group for e in rows],
+            y=[e.diff_h for e in rows],
+            error_y={"type": "data", "array": [e.ci_h for e in rows], "color": "#444"},
+            marker_color=color,
+            name=f"night {when} the workout day",
+            customdata=[[e.nights, e.mean_h, e.ci_h] for e in rows],
+            hovertemplate="%{y:+.2f} h (±%{customdata[2]:.2f}), %{customdata[0]} nights, "
+            "%{customdata[1]:.2f} h average<extra></extra>",
+        )
+    fig.add_annotation(
+        text="Bars show hours more or less sleep than a night with no workout nearby; whiskers are a rough "
+        "95% range. Observational: an early alarm also shortens the night before a morning session.",
+        xref="paper", yref="paper", x=0, y=-0.32, showarrow=False, align="left", font={"size": 11},
+    )  # fmt: skip
+    fig.update_layout(margin={"l": 55, "r": 20, "t": 60, "b": 90})
+    return fig
+
+
+def sleep_and_resting_hr(ds: Dataset, since: date | None = None) -> go.Figure | None:
+    rows = [r for r in analytics.sleep_vs_recovery(_sleep_since(ds, since)) if r.resting_hr is not None]
+    pairs = [(r.sleep_h, r.resting_hr) for r in rows]
+    r = analytics.correlation(pairs)
+    if r is None:
+        return None
+    fig = _base(f"Sleep vs next morning's resting heart rate (r = {r:+.2f}, {len(rows)} nights)", "bpm")
+    fig.update_layout(hovermode="closest", xaxis={**_AXIS, "title": "hours slept"})
+    fig.add_scatter(
+        x=[p[0] for p in pairs],
+        y=[p[1] for p in pairs],
+        mode="markers",
+        marker={"color": BLUE, "size": 5, "opacity": 0.5},
+        name="nights",
+        customdata=[[str(x.night)] for x in rows],
+        hovertemplate="%{customdata[0]}: %{x:.1f} h, %{y:.0f} bpm<extra></extra>",
+    )
+    slope, intercept = linear_regression([p[0] for p in pairs], [p[1] for p in pairs])
+    lo, hi = min(p[0] for p in pairs), max(p[0] for p in pairs)
+    fig.add_scatter(
+        x=[lo, hi], y=[slope * lo + intercept, slope * hi + intercept], mode="lines",
+        line={"color": ORANGE, "width": 2}, name="best-fit line", hoverinfo="skip",
+    )  # fmt: skip
+    return fig
+
+
 # (key, section heading, builder, takes a ``since`` date)
 CHARTS = [
     ("activity", "Activity", weekly_activity, True),
@@ -198,4 +267,6 @@ CHARTS = [
     ("rhr", "Recovery", resting_hr, True),
     ("sleep", "Recovery", sleep, True),
     ("load", "Load", training_load, True),
+    ("sleepwork", "Sleep and training", sleep_around_workouts, True),
+    ("sleeprhr", "Sleep and training", sleep_and_resting_hr, True),
 ]

@@ -42,6 +42,34 @@ def test_since_trims_the_weekly_chart(ds):
     assert min(recent) >= date(2026, 9, 28)  # the Monday of the week holding Oct 1... or later
 
 
+def test_sleep_around_workouts_draws_before_and_after_bars_with_error_bars(ds):
+    fig = figures.sleep_around_workouts(ds)
+    assert [t.name for t in fig.data] == ["night before the workout day", "night after the workout day"]
+    assert all(t.error_y.array is not None and len(t.error_y.array) == len(t.x) for t in fig.data)
+    assert "no workout either side" in fig.layout.title.text
+    assert "Observational" in fig.layout.annotations[0].text
+
+
+def test_sleep_charts_honour_since_and_vanish_without_enough_nights(ds):
+    assert figures.sleep_around_workouts(ds, since=date(2026, 10, 25)) is None  # about a week of nights
+    assert figures.sleep_and_resting_hr(ds, since=date(2026, 10, 25)) is None
+
+
+def test_sleep_and_resting_hr_scatter_reports_r_and_a_fit_line(ds):
+    fig = figures.sleep_and_resting_hr(ds)
+    assert [t.name for t in fig.data] == ["nights", "best-fit line"]
+    assert "r = " in fig.layout.title.text and "nights)" in fig.layout.title.text
+
+
+def test_time_in_bed_only_history_gives_no_sleep_comparison(ds):
+    legacy = Dataset(
+        workouts=ds.workouts,
+        daily=ds.daily,
+        sleep=[type(s)(s.night, s.asleep_s, in_bed_only=True) for s in ds.sleep],
+    )
+    assert figures.sleep_around_workouts(legacy) is None and figures.sleep_and_resting_hr(legacy) is None
+
+
 def test_in_bed_only_nights_are_plotted_apart_from_real_sleep(ds):
     legacy = Dataset(sleep=[type(ds.sleep[0])(night=date(2020, 1, 1), asleep_s=9 * 3600, in_bed_only=True)])
     names = [t.name for t in figures.sleep(legacy).data]
