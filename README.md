@@ -45,6 +45,7 @@ uv venv && uv pip install -e '.[dev]'    # Python 3.11+, everything incl. charts
 uv pip install -e .                      # CLI only (gpxpy)
 uv pip install -e '.[report]'            # + plotly, for `wearables report`
 uv pip install -e '.[app]'               # + plotly and streamlit, for `wearables app`
+uv pip install -e '.[duckdb]'            # + duckdb, to read an Apple Health DuckDB database
 ```
 
 ## Use
@@ -63,15 +64,34 @@ wearables app      my-data/                   # interactive dashboard (range, he
 wearables synth    demo.xml --fitbod demo.csv # synthetic Apple export + Fitbod CSV for demos
 ```
 
-A path can be an Apple `export.xml` / `export.zip`, a Fitbod `WorkoutExport.csv`, a `.gpx` file, or a folder. A folder holding both an Apple export and a Fitbod CSV is merged. `python -m wearables ...` works too. The zip is read in place and the XML is streamed, so large exports do not need to fit in memory. Notes about merging and skipped records go to stderr.
+A path can be an Apple `export.xml` / `export.zip`, an Apple Health `.duckdb` database (below), a Fitbod `WorkoutExport.csv`, a `.gpx` file, or a folder. A folder holding both an Apple export and a Fitbod CSV is merged; if it also holds a `.duckdb` database, the database is used instead of the export, since it carries the same data. `python -m wearables ...` works too. The zip is read in place and the XML is streamed, so large exports do not need to fit in memory. Notes about merging and skipped records go to stderr.
+
+### Reading from DuckDB
+
+A multi-gigabyte export takes minutes to parse, and the dashboard parses again on every start. If you have loaded the export into a DuckDB database once, point the same commands at it:
+
+```
+wearables app    my-data/health.duckdb          # or a folder holding health.duckdb + WorkoutExport.csv
+wearables sleep  my-data/health.duckdb
+```
+
+The adapter (`adapters/health_duckdb.py`) opens the file read-only and reads two tables; any pipeline that fills them works. Timestamps are UTC, stored as naive `TIMESTAMP` columns.
+
+| Table | Columns used |
+|---|---|
+| `records` | `type` (full HealthKit identifier), `source_name`, `value_num` (quantities), `value_text` (category values, e.g. sleep stages), `start_utc`, `end_utc` |
+| `workouts` | `workout_id`, `workout_activity_type`, `source_name`, `start_utc`, `end_utc`, `duration_min`, `active_energy` / `active_energy_unit`, `distance` / `distance_unit`, `hr_avg`, `hr_max` |
+
+It derives days, weeks and sleep nights from the UTC columns in `America/New_York`, so any time zone the database's own views were built with is ignored, and it applies the same rules as the XML adapter (busiest step source per day, union of overlapping sleep intervals, heart-rate samples only when dense enough). A test builds a database from the synthetic export and checks that both adapters return the same data.
 
 ## Design
 
 ```
-adapters/apple_health.py ┐
-adapters/fitbod.py       ├─> model.Dataset ─> merge.reconcile ─> analytics ─┬─> cli
-adapters/gpx.py          ┘                                                  └─> figures ─┬─> report (static HTML)
-(future: Oura, Garmin, …)                                                                └─> app (Streamlit)
+adapters/apple_health.py  ┐
+adapters/health_duckdb.py ┤
+adapters/fitbod.py        ├─> model.Dataset ─> merge.reconcile ─> analytics ─┬─> cli
+adapters/gpx.py           ┘                                                  └─> figures ─┬─> report (static HTML)
+(future: Oura, Garmin, …)                                                                 └─> app (Streamlit)
 ```
 
 The charts grew in three steps, each on top of the last: the CLI and `--json` first, then `figures.py` plus a static `report` (a file you can open, send or archive, with no server), then the Streamlit `app` as a thin layer that calls the same figure functions and adds a range picker and heart-rate overrides. Fixing a chart in `figures.py` fixes it in both.
@@ -92,7 +112,7 @@ Choices worth knowing:
 - **Lifting volume** = reps × weight × multiplier, warm-ups excluded. Fitbod does not document the multiplier (2.0 for a pair of dumbbells, 0.0 for bodyweight and holds); this is the usual reading.
 - **Training load** = minutes × share of heart-rate reserve used (clamped 0 to 1), as 7-day vs 28-day daily averages. It is a rough way to compare weeks, not medical or coaching advice. Workouts without heart rate are skipped and counted, so it understates load when many are missing.
 - GPX elevation gain is smoothed by `gpxpy`, so it reads lower than a raw sum.
-- **Charts stay local.** The report is a file; by default it loads plotly.js from a CDN (the page fetches the script, your data is embedded in the file and never sent), and `--offline` embeds the library instead (~5 MB). The app binds to `127.0.0.1` and turns Streamlit's usage statistics off. A large Apple export takes a couple of minutes to parse; the app parses once per server run and keeps the result.
+- **Charts stay local.** The report is a file; by default it loads plotly.js from a CDN (the page fetches the script, your data is embedded in the file and never sent), and `--offline` embeds the library instead (~5 MB). The app binds to `127.0.0.1` and turns Streamlit's usage statistics off. A large Apple export takes a couple of minutes to parse (a DuckDB database, see above, takes seconds); the app parses once per server run and keeps the result.
 - **Load chart caveat.** Workouts with no heart rate are left out and the chart title counts them, so on data where many are missing the lines understate real load.
 
 ## Tests
@@ -106,7 +126,7 @@ The synthetic generator doubles as the test oracle. `synth.build` makes a ground
 ## Not yet
 
 - No FIT, TCX, Oura, Garmin or Google Health adapters (Garmin's Personal API and Oura's OAuth API are the candidates).
-- The app re-parses on every server start (no on-disk cache), and the charts were checked by tests and a headless run rather than by eye on every browser.
+- Fitbod and GPX still parse from files on every start, and the DuckDB adapter reads only workouts, heart rate, resting HR, HRV, steps and sleep from the database (no routes, no other record types yet). Reading a raw export has no on-disk cache. The charts were checked by tests and a headless run rather than by eye on every browser.
 - No hosted demo of the app; the synthetic data would make a safe one.
 - Hevy (a second lifting app) is only seen through the Apple workouts it writes; there is no set-level reader.
 - Sleep before iOS 16 has no stages, so its quality cannot be analysed, and it is left out of the sleep-vs-workout comparison.
